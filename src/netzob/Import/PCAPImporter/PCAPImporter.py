@@ -88,6 +88,7 @@ class PCAPImporter(object):
         pcapy.DLT_LINUX_SLL: "LINUX_SLL",
         pcapy.DLT_PPP: "DLT_PPP",
         pcapy.DLT_SLIP: "DLT_SLIP",
+        pcapy.DLT_IEEE802_15_4: "DLT_IEEE802_15_4",
     }
 
     def __init__(self):
@@ -123,7 +124,7 @@ class PCAPImporter(object):
         if self.datalink not in PCAPImporter.SUPPORTED_DATALINKS.keys():
             self._logger.debug("Unkown datalinks")
 
-        if self.importLayer > 1 and self.datalink != pcapy.DLT_EN10MB and self.datalink != pcapy.DLT_LINUX_SLL and self.datalink != PCAPImporter.PROTOCOL201:
+        if self.importLayer > 1 and self.datalink != pcapy.DLT_EN10MB and self.datalink != pcapy.DLT_LINUX_SLL and self.datalink != PCAPImporter.PROTOCOL201 and self.datalink != pcapy.DLT_IEEE802_15_4:
             errorMessage = _("This pcap cannot be imported since the "
                              + "layer 2 is not supported ({0})").format(str(self.datalink))
             raise NetzobImportException("PCAP", errorMessage, self.INVALID_LAYER2)
@@ -205,6 +206,9 @@ class PCAPImporter(object):
             return ":".join("{0:0>2}".format(
                 hex(b)[2:]) for b in arrayMac.tolist())
 
+        def formatPanAddress(arrayPan):
+            return "".join(hex(b)[2:] for b in arrayPan.tolist())
+
         if self.datalink == pcapy.DLT_EN10MB:
             l2Decoder = Decoders.EthDecoder()
             l2Proto = "Ethernet"
@@ -231,6 +235,18 @@ class PCAPImporter(object):
             l2DstAddr = None
             l2Payload = payload[8:]
             etherType = payload[4:6]
+        elif self.datalink == pcapy.DLT_IEEE802_15_4:
+            l2Decoder = Decoders.IEEE8021504Decoder()
+            layer2 = l2Decoder.decode(payload)
+            CF = layer2.get_control_field()
+            l2Proto = "IEEE 802 15 4"
+            l2DstAddr = formatPanAddress(layer2.get_dst())
+            l2SrcAddr = formatPanAddress(layer2.get_src())
+            l2Payload = payload[9:]
+            etherType = "Zigbee"
+            print payload.encode('hex')
+            print l2DstAddr
+            print l2SrcAddr
 
         return (l2Proto, l2SrcAddr, l2DstAddr, l2Payload, etherType)
 
@@ -250,6 +266,14 @@ class PCAPImporter(object):
                 l3Payload = l3Payload[:len(l3Payload) - paddingSize]
             ipProtocolNum = layer3.get_ip_p()
             return (l3Proto, l3SrcAddr, l3DstAddr, l3Payload, ipProtocolNum)
+
+        elif etherType == "Zigbee":
+            l3Proto = "Zigbee Network"
+            l3SrcAddr = l2Payload[4:6]
+            l3DstAddr = l2Payload[2:4]
+            ipProtocolNum = "Zigbee"
+            return (l3Proto, l3SrcAddr, l3DstAddr, l3Payload, ipProtocolNum)
+            
         else:
             warnMessage = _("Cannot import one of the provided packets since " +
                             "its layer 3 is unsupported (Only IP is " +
@@ -391,6 +415,7 @@ class PCAPImporter(object):
         """
 
         importer = PCAPImporter()
+        print importLayer
         return importer.readFiles([filePath], bpfFilter, importLayer, nbPackets)
 
     @staticmethod
